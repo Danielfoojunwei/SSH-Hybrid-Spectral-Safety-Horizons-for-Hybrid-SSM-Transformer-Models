@@ -1,0 +1,65 @@
+{
+    "experiment": {
+        "L": 512,
+        "epsilon": 0.01,
+        "delta_star_transformer": 1.0,
+        "default_device": "auto",
+        "default_batch_size": 8
+    },
+    "models": {
+        "jamba-1.5-mini": {
+            "hf_model_id": "ai21labs/Jamba-v0.1",
+            "model_type": "jamba",
+            "r_ssm": 0.875,
+            "trust_remote_code": true,
+            "role": "primary"
+        },
+        "zamba-7b": {
+            "hf_model_id": "Zyphra/Zamba-7B-v1",
+            "model_type": "zamba",
+            "r_ssm": 0.850,
+            "trust_remote_code": true,
+            "role": "secondary"
+        },
+        "pythia-2.8b": {
+            "hf_model_id": "EleutherAI/pythia-2.8b",
+            "model_type": "pythia",
+            "r_ssm": 0.0,
+            "role": "transformer_baseline"
+        },
+        "mamba-2.8b": {
+            "hf_model_id": "state-spaces/mamba-2.8b",
+            "model_type": "mamba",
+            "r_ssm": 1.0,
+            "role": "ssm_baseline"
+        }
+    },
+    "mbca": {
+        "K_default": 8,
+        "K_range": [4, 8, 12, 16, 24],
+        "safety_formula": "any",
+        "probe_training": {
+            "epochs": 20,
+            "lr": 0.001,
+            "batch_size": 256,
+            "val_fraction": 0.2
+        }
+    },
+    "evaluation": {
+        "benchmarks": ["hellaswag", "mmlu", "arc_challenge"],
+        "hispa_configs": [
+            "z-hispa-1", "z-hispa-2", "z-hispa-3",
+            "z-hispa-4", "z-hispa-5", "z-hispa-6", "z-hispa-7"
+        ],
+        "max_sequence_length": 512
+    },
+    "acceptance_criteria": {
+        "theorem1_pearson_r": 0.80,
+        "theorem1_relative_mae": 0.15,
+        "mbca_beta_min": 0.70,
+        "benign_degradation_max": 0.02,
+        "chss_recovery_min": 0.63,
+        "h_rho_computation_time_ms": 100,
+        "full_audit_time_min": 30
+    }
+}
