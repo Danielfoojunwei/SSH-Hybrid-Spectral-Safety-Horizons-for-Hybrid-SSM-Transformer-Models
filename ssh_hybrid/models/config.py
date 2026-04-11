@@ -59,4 +59,37 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         vram_gb_bf16=6.0,
         role="ssm_baseline",
     ),
+    # Lightweight models for CPU testing / pipeline validation
+    "gpt2": ModelConfig(
+        name="gpt2",
+        hf_model_id="gpt2",
+        model_type="pythia",  # pure transformer architecture
+        r_ssm=0.0,
+        params_billions=0.124,
+        vram_gb_bf16=0.25,
+        role="cpu_test_transformer",
+        torch_dtype="float32",
+    ),
+    "pythia-160m": ModelConfig(
+        name="pythia-160m",
+        hf_model_id="EleutherAI/pythia-160m",
+        model_type="pythia",
+        r_ssm=0.0,
+        params_billions=0.160,
+        vram_gb_bf16=0.32,
+        role="cpu_test_transformer",
+        torch_dtype="float32",
+    ),
+    # Gemma models — instruction-tuned, so they have real safety training
+    # to test against (unlike GPT-2 which has no safety alignment)
+    "gemma-3-1b-it": ModelConfig(
+        name="gemma-3-1b-it",
+        hf_model_id="google/gemma-3-1b-it",
+        model_type="pythia",  # pure transformer
+        r_ssm=0.0,
+        params_billions=1.0,
+        vram_gb_bf16=2.0,
+        role="instruction_tuned_baseline",
+        torch_dtype="float32",
+    ),
 }
