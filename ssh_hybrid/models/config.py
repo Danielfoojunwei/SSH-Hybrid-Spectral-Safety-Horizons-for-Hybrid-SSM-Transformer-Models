@@ -62,7 +62,7 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
     # Lightweight models for CPU testing / pipeline validation
     "gpt2": ModelConfig(
         name="gpt2",
-        hf_model_id="gpt2",
+        hf_model_id="openai-community/gpt2",
         model_type="pythia",  # pure transformer architecture
         r_ssm=0.0,
         params_billions=0.124,
