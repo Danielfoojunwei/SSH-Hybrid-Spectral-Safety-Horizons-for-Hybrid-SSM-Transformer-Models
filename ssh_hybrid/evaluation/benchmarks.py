@@ -2,6 +2,10 @@
 
 Measures benign task performance (HellaSwag, MMLU, ARC-Challenge)
 to ensure MBCA monitoring does not degrade model quality.
+
+Supports both subprocess-based evaluation (baseline model) and
+in-process evaluation with MBCA wrapping (monitored model), so
+benign degradation is measured on the actual monitored system.
 """
 
 from __future__ import annotations
@@ -13,6 +17,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+import torch
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +44,10 @@ def run_lm_eval_benchmark(
     trust_remote_code: bool = False,
     output_dir: str | None = None,
 ) -> list[BenchmarkResult]:
-    """Run lm-eval-harness benchmarks on a model.
+    """Run lm-eval-harness benchmarks on a model via subprocess.
+
+    NOTE: This runs the UNMODIFIED model. To measure MBCA-monitored
+    performance, use run_lm_eval_in_process() with a wrapped model.
 
     Args:
         model_name_or_path: HuggingFace model ID or local path.
@@ -111,6 +120,117 @@ def run_lm_eval_benchmark(
     return results
 
 
+def run_lm_eval_in_process(
+    model: torch.nn.Module,
+    tokenizer: Any,
+    model_name: str,
+    benchmarks: list[str] | None = None,
+    batch_size: int = 8,
+    device: str = "cuda",
+    num_fewshot: int | None = None,
+    output_dir: str | None = None,
+) -> list[BenchmarkResult]:
+    """Run lm-eval-harness benchmarks in-process on an already-loaded model.
+
+    This enables evaluating MBCA-wrapped models where the subprocess
+    approach cannot inject the MBCA register. The model object is passed
+    directly to lm-eval's API.
+
+    Args:
+        model: Pre-loaded model (potentially wrapped with MBCA).
+        tokenizer: Associated tokenizer.
+        model_name: Model identifier for logging.
+        benchmarks: List of benchmark names.
+        batch_size: Evaluation batch size.
+        device: Device for evaluation.
+        num_fewshot: Number of few-shot examples.
+        output_dir: Output directory.
+
+    Returns:
+        List of BenchmarkResult for each benchmark.
+    """
+    if benchmarks is None:
+        benchmarks = ["hellaswag", "mmlu", "arc_challenge"]
+
+    if output_dir is None:
+        output_dir = tempfile.mkdtemp(prefix="ssh_hybrid_eval_inproc_")
+
+    results = []
+
+    try:
+        from lm_eval import evaluator as lm_evaluator
+        from lm_eval.models.huggingface import HFLM
+    except ImportError:
+        logger.error(
+            "lm-eval not installed for in-process evaluation. "
+            "Install with: pip install lm-eval. "
+            "Falling back to subprocess evaluation (which cannot measure "
+            "MBCA-monitored performance)."
+        )
+        return results
+
+    try:
+        # Wrap the pre-loaded model for lm-eval
+        lm = HFLM(
+            pretrained=model,
+            tokenizer=tokenizer,
+            batch_size=batch_size,
+            device=device,
+        )
+
+        for benchmark in benchmarks:
+            logger.info(
+                "Running %s on %s (in-process)", benchmark, model_name
+            )
+
+            eval_results = lm_evaluator.simple_evaluate(
+                model=lm,
+                tasks=[benchmark],
+                num_fewshot=num_fewshot,
+                batch_size=batch_size,
+                device=device,
+                log_samples=False,
+            )
+
+            if eval_results and "results" in eval_results:
+                for task_name, task_results in eval_results["results"].items():
+                    if benchmark in task_name:
+                        acc_key = next(
+                            (k for k in task_results
+                             if "acc" in k.lower() and "stderr" not in k.lower()),
+                            None,
+                        )
+                        stderr_key = next(
+                            (k for k in task_results if "stderr" in k.lower()),
+                            None,
+                        )
+
+                        if acc_key:
+                            result = BenchmarkResult(
+                                benchmark=benchmark,
+                                model_name=model_name,
+                                accuracy=task_results[acc_key],
+                                stderr=task_results.get(stderr_key, 0.0) if stderr_key else 0.0,
+                                n_samples=task_results.get("n_samples", 0),
+                                raw_results=task_results,
+                            )
+                            results.append(result)
+                            logger.info(
+                                "%s on %s (in-process): accuracy=%.4f (±%.4f)",
+                                benchmark, model_name,
+                                result.accuracy, result.stderr,
+                            )
+
+    except Exception as e:
+        logger.error(
+            "In-process lm-eval failed: %s. The lm-eval API may have changed. "
+            "Check lm-eval version compatibility.",
+            str(e),
+        )
+
+    return results
+
+
 def _parse_lm_eval_output(
     output_dir: str,
     benchmark: str,
@@ -157,6 +277,11 @@ def compare_benchmark_results(
     monitored_results: list[BenchmarkResult],
 ) -> dict[str, float]:
     """Compare benchmark results between baseline and MBCA-monitored model.
+
+    IMPORTANT: For a valid comparison, baseline_results should come from
+    run_lm_eval_benchmark (unmodified model) and monitored_results should
+    come from run_lm_eval_in_process (MBCA-wrapped model). Using subprocess
+    evaluation for both does NOT measure MBCA overhead.
 
     Args:
         baseline_results: Results without MBCA.

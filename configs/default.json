@@ -2,6 +2,7 @@
     "experiment": {
         "L": 512,
         "epsilon": 0.01,
+        "_NOTE_delta_star": "delta_star_transformer should be measured empirically via evaluation/safety_margin.py, not hardcoded. The value 1.0 is a normalization placeholder.",
         "delta_star_transformer": 1.0,
         "default_device": "auto",
         "default_batch_size": 8
@@ -54,8 +55,8 @@
         "max_sequence_length": 512
     },
     "acceptance_criteria": {
-        "theorem1_pearson_r": 0.80,
-        "theorem1_relative_mae": 0.15,
+        "proposition1_pearson_r": 0.80,
+        "proposition1_relative_mae": 0.15,
         "mbca_beta_min": 0.70,
         "benign_degradation_max": 0.02,
         "chss_recovery_min": 0.63,

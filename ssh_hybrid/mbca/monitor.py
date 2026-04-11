@@ -2,11 +2,15 @@
 
 Wraps a hybrid model with MBCA register to provide real-time safety
 monitoring during generation. Implements the full Phase 3 pipeline.
+
+Uses KV cache for efficient autoregressive generation — each step
+only processes the new token rather than re-running the full sequence.
 """
 
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 
 import torch
@@ -27,6 +31,7 @@ class MonitorResult:
     register_state: MBCAState
     triggered_probes: list[int]
     total_tokens_processed: int
+    generation_time_ms: float = 0.0
 
 
 class MBCAMonitor(nn.Module):
@@ -34,6 +39,10 @@ class MBCAMonitor(nn.Module):
 
     Wraps a model and applies MBCA register checks at each generation step.
     When the safety formula triggers, generation is blocked.
+
+    Uses KV cache (past_key_values) for efficient incremental generation.
+    Without KV cache, each step would require a full forward pass over
+    the entire sequence, making overhead O(n^2) instead of O(n).
 
     Args:
         model: The hybrid model to monitor.
@@ -64,12 +73,12 @@ class MBCAMonitor(nn.Module):
         temperature: float = 1.0,
         top_p: float = 1.0,
     ) -> MonitorResult:
-        """Generate tokens with MBCA safety monitoring.
+        """Generate tokens with MBCA safety monitoring and KV cache.
 
         At each step:
-        1. Run forward pass with output_hidden_states=True
-        2. Extract attention-layer hidden states
-        3. Update MBCA register
+        1. Run forward pass with KV cache for efficiency
+        2. Extract attention-layer hidden states from the new token
+        3. Update MBCA register (monotone OR)
         4. If safety formula triggers, BLOCK output
 
         Args:
@@ -92,13 +101,33 @@ class MBCAMonitor(nn.Module):
         block_position = None
 
         current_ids = input_ids
+        past_key_values = None
+        t_start = time.perf_counter()
 
         for step in range(max_new_tokens):
-            outputs = self.model(
-                input_ids=current_ids,
-                attention_mask=attention_mask,
-                output_hidden_states=True,
-            )
+            # Use KV cache for efficient incremental generation
+            model_kwargs = {
+                "input_ids": current_ids,
+                "attention_mask": attention_mask,
+                "output_hidden_states": True,
+                "use_cache": True,
+            }
+            if past_key_values is not None:
+                model_kwargs["past_key_values"] = past_key_values
+
+            try:
+                outputs = self.model(**model_kwargs)
+                # Cache the KV states for next step
+                if hasattr(outputs, "past_key_values") and outputs.past_key_values is not None:
+                    past_key_values = outputs.past_key_values
+            except TypeError:
+                # Some models (e.g., Mamba) may not support use_cache
+                # Fall back to non-cached forward pass
+                outputs = self.model(
+                    input_ids=current_ids,
+                    attention_mask=attention_mask,
+                    output_hidden_states=True,
+                )
 
             # Extract attention hidden state from the last position
             attention_hidden = self._extract_attention_hidden(
@@ -130,13 +159,15 @@ class MBCAMonitor(nn.Module):
 
             generated_tokens.append(next_token[0, 0].item())
 
-            # Prepare for next step
+            # For cached generation, only pass the new token
             current_ids = next_token
             if attention_mask is not None:
                 attention_mask = torch.cat(
                     [attention_mask, torch.ones(batch_size, 1, device=device)],
                     dim=1,
                 )
+
+        elapsed_ms = (time.perf_counter() - t_start) * 1000
 
         return MonitorResult(
             output_tokens=generated_tokens,
@@ -145,6 +176,7 @@ class MBCAMonitor(nn.Module):
             register_state=state,
             triggered_probes=state.triggered_indices,
             total_tokens_processed=len(generated_tokens),
+            generation_time_ms=elapsed_ms,
         )
 
     def _extract_attention_hidden(
@@ -185,7 +217,7 @@ class MBCAMonitor(nn.Module):
     ) -> float:
         """Measure MBCA coverage fraction beta_MBCA on attack samples.
 
-        beta_MBCA = P(BLOCK | HiSPA attack, MBCA active)
+        beta_MBCA = P(BLOCK | attack, MBCA active)
 
         Args:
             attack_inputs: List of (batch, seq) attack input tensors.
@@ -210,6 +242,63 @@ class MBCAMonitor(nn.Module):
                 n_blocked += input_ids.shape[0]
 
         return n_blocked / max(1, n_total)
+
+    def measure_overhead(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor | None = None,
+        max_new_tokens: int = 128,
+        n_trials: int = 3,
+    ) -> dict[str, float]:
+        """Measure wall-clock overhead of MBCA monitoring vs baseline generation.
+
+        Args:
+            input_ids: Input tokens for benchmarking.
+            attention_mask: Optional attention mask.
+            max_new_tokens: Tokens to generate per trial.
+            n_trials: Number of trials to average.
+
+        Returns:
+            Dict with baseline_ms, monitored_ms, overhead_ratio.
+        """
+        # Baseline: generate without MBCA
+        baseline_times = []
+        for _ in range(n_trials):
+            t0 = time.perf_counter()
+            self.model.generate(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+            )
+            baseline_times.append((time.perf_counter() - t0) * 1000)
+
+        # Monitored: generate with MBCA
+        monitored_times = []
+        for _ in range(n_trials):
+            result = self.monitored_generate(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                max_new_tokens=max_new_tokens,
+                temperature=0.0,  # greedy for fair comparison
+            )
+            monitored_times.append(result.generation_time_ms)
+
+        baseline_mean = sum(baseline_times) / len(baseline_times)
+        monitored_mean = sum(monitored_times) / len(monitored_times)
+        overhead = (monitored_mean - baseline_mean) / max(1e-8, baseline_mean)
+
+        logger.info(
+            "MBCA overhead: baseline=%.1fms, monitored=%.1fms, overhead=%.1f%%",
+            baseline_mean, monitored_mean, overhead * 100,
+        )
+
+        return {
+            "baseline_ms": baseline_mean,
+            "monitored_ms": monitored_mean,
+            "overhead_ratio": overhead,
+            "overhead_pct": overhead * 100,
+        }
 
 
 def _top_p_filter(logits: torch.Tensor, top_p: float) -> torch.Tensor:

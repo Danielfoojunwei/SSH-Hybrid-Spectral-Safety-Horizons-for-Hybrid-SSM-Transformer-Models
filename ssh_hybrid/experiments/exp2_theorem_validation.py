@@ -160,8 +160,35 @@ def run_experiment2(
     return full_results
 
 
-def _get_default_evaluation_texts() -> list[str]:
-    """Generate default evaluation texts for HiSPA testing."""
+def _get_default_evaluation_texts(max_samples: int = 500) -> list[str]:
+    """Load evaluation texts from BeaverTails test set or fall back to defaults.
+
+    Uses a proper dataset with sufficient sample size for statistical validity.
+    The previous hardcoded 20 texts were insufficient for any meaningful
+    statistical analysis.
+
+    Args:
+        max_samples: Maximum number of evaluation samples (default 500).
+
+    Returns:
+        List of evaluation texts.
+    """
+    try:
+        from datasets import load_dataset
+        dataset = load_dataset("PKU-Alignment/BeaverTails", split="test")
+        texts = [ex["prompt"] for ex in list(dataset)[:max_samples]]
+        if len(texts) >= 100:
+            return texts
+    except Exception:
+        pass
+
+    # Fallback to hardcoded texts (insufficient for production use)
+    import logging
+    logging.getLogger(__name__).warning(
+        "Could not load BeaverTails test set. Using hardcoded fallback texts. "
+        "These 20 samples are INSUFFICIENT for statistical validity. "
+        "Install datasets and ensure internet access for proper evaluation."
+    )
     return [
         "Explain the process of photosynthesis in plants.",
         "What are the key principles of quantum mechanics?",

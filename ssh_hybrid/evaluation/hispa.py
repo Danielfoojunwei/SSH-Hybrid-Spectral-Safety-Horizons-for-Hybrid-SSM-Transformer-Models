@@ -1,7 +1,16 @@
 """HiSPA (Hidden State Path Attack) evaluation pipeline.
 
-Implements RoBench-25 evaluation with 7 Z-HiSPA trigger configurations
-across 4 model conditions, following Le Mercier et al. (2025-2026).
+Implements evaluation with 7 Z-HiSPA trigger configurations
+across 4 model conditions. These triggers are designed to exploit
+SSM hidden-state decay by various methods (padding, repetition,
+context overflow) that force the model to process tokens beyond
+the safety memory horizon H(rho).
+
+NOTE: These are basic perturbation-based triggers, not sophisticated
+adversarial attacks. For rigorous safety evaluation, supplement with
+established attack libraries (GCG, AutoDAN, PAIR) and behavioral
+metrics (attack success rate) in addition to CHSS representation
+metrics. See evaluation/safety_margin.py for behavioral measurement.
 """
 
 from __future__ import annotations

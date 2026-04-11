@@ -1,9 +1,16 @@
 """Content-Hidden State Score (CHSS) computation.
 
-Measures the alignment between model hidden states and safety-relevant
-content, following the RoBench-25 methodology (Le Mercier et al., 2025).
-CHSS degradation under HiSPA attacks quantifies architecture-specific
-safety vulnerabilities.
+Measures the alignment between model hidden states under clean vs.
+perturbed conditions via cosine similarity.
+
+IMPORTANT LIMITATION: CHSS measures REPRESENTATION SHIFT, not safety.
+A model could have high representation shift yet remain behaviorally safe
+(different internal pathway, same output), or have minimal representation
+shift yet produce unsafe outputs (small perturbation in a critical
+direction). CHSS should be treated as a supplementary analysis metric
+and validated against behavioral safety metrics (attack success rate)
+before being used as a safety indicator. See evaluation/safety_margin.py
+for behavioral safety measurement.
 """
 
 from __future__ import annotations

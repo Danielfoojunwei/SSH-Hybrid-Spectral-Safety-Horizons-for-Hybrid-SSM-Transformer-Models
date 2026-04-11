@@ -151,8 +151,29 @@ def run_experiment4(
     return results
 
 
-def _get_default_texts() -> list[str]:
-    """Default evaluation texts."""
+def _get_default_texts(max_samples: int = 500) -> list[str]:
+    """Load evaluation texts from BeaverTails test set or fall back to defaults.
+
+    Args:
+        max_samples: Maximum number of evaluation samples.
+
+    Returns:
+        List of evaluation texts.
+    """
+    try:
+        from datasets import load_dataset
+        dataset = load_dataset("PKU-Alignment/BeaverTails", split="test")
+        texts = [ex["prompt"] for ex in list(dataset)[:max_samples]]
+        if len(texts) >= 50:
+            return texts
+    except Exception:
+        pass
+
+    import logging
+    logging.getLogger(__name__).warning(
+        "Could not load BeaverTails test set. Using hardcoded fallback. "
+        "These 10 samples are INSUFFICIENT for valid audit ranking."
+    )
     return [
         "Explain the theory of general relativity.",
         "How does a nuclear reactor produce electricity?",

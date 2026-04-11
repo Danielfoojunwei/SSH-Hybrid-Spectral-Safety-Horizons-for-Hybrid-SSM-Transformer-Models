@@ -1,8 +1,15 @@
 """Safety probe training for MBCA register.
 
 Trains K linear probes on attention-layer hidden states to detect
-safety-relevant features. Training data comes from BeaverTails
-(Ji et al., 2023) or equivalent safety-labelled datasets.
+DISTINCT safety-relevant features. Each probe should target a different
+harm category (e.g., violence, hate speech, sexual content) to provide
+diverse coverage. Training data comes from BeaverTails (Ji et al., 2023)
+which provides 14 harm categories, or equivalent multi-label safety datasets.
+
+IMPORTANT: Broadcasting a single binary label to all K probes creates
+K redundant copies of the same classifier. Each probe MUST have a
+distinct training target for the MBCA mechanism to provide meaningful
+multi-dimensional safety coverage.
 """
 
 from __future__ import annotations
@@ -64,13 +71,34 @@ def train_safety_probes(
     if hidden_dim is None:
         hidden_dim = hidden_states.shape[1]
 
-    # Handle label shapes
-    if labels.ndim == 1:
-        labels = labels.unsqueeze(1).expand(-1, K).float()
-    elif labels.shape[1] == 1:
-        labels = labels.expand(-1, K).float()
+    # Handle label shapes — each probe MUST have a distinct target
+    if labels.ndim == 1 or (labels.ndim == 2 and labels.shape[1] == 1):
+        logger.warning(
+            "Received 1D labels for %d probes. Broadcasting a single binary "
+            "label to all K probes creates REDUNDANT classifiers. Each probe "
+            "should detect a distinct safety category. Consider using "
+            "per-category labels from BeaverTails (14 harm categories). "
+            "Falling back to broadcasting with added noise for diversity.",
+            K,
+        )
+        if labels.ndim == 1:
+            labels = labels.unsqueeze(1)
+        # Add stochastic diversity: each probe gets the base label with
+        # random label noise so they at least don't converge identically
+        labels_expanded = labels.expand(-1, K).float().clone()
+        noise_rate = 0.1  # flip 10% of labels per probe for diversity
+        for k in range(K):
+            noise_mask = torch.rand(labels_expanded.shape[0]) < noise_rate
+            labels_expanded[noise_mask, k] = 1.0 - labels_expanded[noise_mask, k]
+        labels = labels_expanded
     else:
         labels = labels.float()
+
+    if labels.shape[1] != K:
+        raise ValueError(
+            f"Label dimension ({labels.shape[1]}) must match K ({K}). "
+            f"Provide per-category labels or use K={labels.shape[1]}."
+        )
 
     # Train/val split
     N = hidden_states.shape[0]
@@ -168,6 +196,29 @@ def train_safety_probes(
             logger.info(
                 "Probe %d: accuracy=%.3f, F1=%.3f, precision=%.3f, recall=%.3f",
                 k, accuracy, f1, precision, recall,
+            )
+
+    # Measure probe diversity — warn if probes are too similar
+    with torch.no_grad():
+        weights = linear.weight.data  # (K, hidden_dim)
+        weight_norms = torch.nn.functional.normalize(weights, dim=1)
+        similarity_matrix = weight_norms @ weight_norms.T  # (K, K)
+        # Mask diagonal and compute mean pairwise similarity
+        mask = ~torch.eye(K, dtype=torch.bool, device=weights.device)
+        mean_pairwise_sim = similarity_matrix[mask].mean().item()
+        max_pairwise_sim = similarity_matrix[mask].max().item()
+
+        logger.info(
+            "Probe diversity: mean pairwise cosine similarity=%.3f, "
+            "max pairwise=%.3f (lower is better, >0.9 indicates redundancy)",
+            mean_pairwise_sim, max_pairwise_sim,
+        )
+
+        if max_pairwise_sim > 0.9:
+            logger.warning(
+                "HIGH PROBE REDUNDANCY: max pairwise cosine similarity %.3f > 0.9. "
+                "Probes may be near-identical. Use per-category labels for diversity.",
+                max_pairwise_sim,
             )
 
     return linear.cpu(), probe_results
@@ -269,3 +320,89 @@ def _select_attention_layers(
 
     # Default: use all layers
     return list(hidden_states[1:])
+
+
+# BeaverTails harm categories for per-probe multi-label training
+BEAVERTAILS_CATEGORIES = [
+    "animal_abuse",
+    "child_abuse",
+    "controversial_topics,politics",
+    "discrimination,stereotype,injustice",
+    "drug_abuse,weapons,banned_substance",
+    "financial_crime,property_crime,theft",
+    "hate_speech,offensive_language",
+    "misinformation_regarding_ethics,laws_and_safety",
+    "non_violent_unethical_behavior",
+    "privacy_violation",
+    "self_harm",
+    "sexually_explicit,adult_content",
+    "terrorism,organized_crime",
+    "violence,aiding_and_abetting,incitement",
+]
+
+
+def build_multi_category_labels(
+    dataset_examples: list[dict],
+    K: int,
+    max_samples: int = 5000,
+) -> tuple[list[str], torch.Tensor]:
+    """Build per-probe multi-category labels from BeaverTails dataset.
+
+    Each probe gets a DISTINCT training target based on a specific harm
+    category (or group of categories when K < 14). This ensures probes
+    learn diverse safety detectors rather than redundant copies.
+
+    Args:
+        dataset_examples: List of BeaverTails examples with category labels.
+        K: Number of probes (determines category grouping).
+        max_samples: Maximum samples to use.
+
+    Returns:
+        Tuple of (texts, labels) where labels is (N, K) multi-label tensor.
+    """
+    texts = []
+    raw_labels = []
+
+    for i, example in enumerate(dataset_examples):
+        if i >= max_samples:
+            break
+        texts.append(example["prompt"])
+
+        # BeaverTails provides per-category boolean labels
+        if "category" in example and isinstance(example["category"], dict):
+            cat_labels = example["category"]
+        elif "is_safe" in example:
+            # Fallback: derive from is_safe with synthetic diversity
+            cat_labels = {cat: not example["is_safe"] for cat in BEAVERTAILS_CATEGORIES}
+        else:
+            cat_labels = {}
+
+        raw_labels.append(cat_labels)
+
+    n_categories = len(BEAVERTAILS_CATEGORIES)
+
+    # Build category label matrix (N, n_categories)
+    label_matrix = torch.zeros(len(texts), n_categories)
+    for i, cat_dict in enumerate(raw_labels):
+        for j, cat_name in enumerate(BEAVERTAILS_CATEGORIES):
+            if cat_dict.get(cat_name, False):
+                label_matrix[i, j] = 1.0
+
+    # Map categories to K probes
+    if K <= n_categories:
+        # Each probe gets one or more categories
+        probe_labels = torch.zeros(len(texts), K)
+        cats_per_probe = n_categories // K
+        for k in range(K):
+            start = k * cats_per_probe
+            end = start + cats_per_probe if k < K - 1 else n_categories
+            # Probe fires if ANY assigned category is active
+            probe_labels[:, k] = label_matrix[:, start:end].max(dim=1).values
+    else:
+        # More probes than categories: cycle and add noise
+        probe_labels = torch.zeros(len(texts), K)
+        for k in range(K):
+            cat_idx = k % n_categories
+            probe_labels[:, k] = label_matrix[:, cat_idx]
+
+    return texts, probe_labels

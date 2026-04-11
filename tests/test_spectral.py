@@ -1,7 +1,7 @@
 """Tests for spectral analysis module.
 
 Tests core mathematical computations: spectral radius, safety memory horizon,
-attenuation factor, and safety margin theorems. Uses real numpy/scipy
+attenuation factor, and safety margin propositions. Uses real numpy/scipy
 computations — no mocks.
 """
 
@@ -26,6 +26,8 @@ from ssh_hybrid.spectral.margin import (
     spectral_safety_margin_bound,
     mbca_compensated_margin,
     safety_margin_deficit,
+    mbca_recovery_fraction,
+    compute_empirical_safety_margin,
 )
 
 
@@ -108,8 +110,10 @@ class TestSafetyMemoryHorizon:
         expected = math.log(100) / math.log(1 / 0.99)
         assert H == pytest.approx(expected)
 
-    def test_rho_zero_infinite_horizon(self):
-        assert safety_memory_horizon(0.0) == float("inf")
+    def test_rho_zero_instant_forgetting(self):
+        # rho=0 means A_bar=0: hidden state zeroed instantly.
+        # Memory horizon should be 0 (instant forgetting), not infinity.
+        assert safety_memory_horizon(0.0) == 0.0
 
     def test_rho_one_infinite_horizon(self):
         assert safety_memory_horizon(1.0) == float("inf")
@@ -235,3 +239,38 @@ class TestSafetyMarginBound:
         d_jamba = spectral_safety_margin_bound(1.0, rho=rho, r_ssm=0.875)
         d_mamba = spectral_safety_margin_bound(1.0, rho=rho, r_ssm=1.0)
         assert d_pythia > d_zamba > d_jamba > d_mamba
+
+
+class TestEmpiricalSafetyMetrics:
+    """Tests for empirical safety measurement functions."""
+
+    def test_recovery_fraction_basic(self):
+        assert mbca_recovery_fraction(7, 10) == pytest.approx(0.7)
+
+    def test_recovery_fraction_all_blocked(self):
+        assert mbca_recovery_fraction(10, 10) == pytest.approx(1.0)
+
+    def test_recovery_fraction_none_blocked(self):
+        assert mbca_recovery_fraction(0, 10) == pytest.approx(0.0)
+
+    def test_recovery_fraction_no_violations(self):
+        assert mbca_recovery_fraction(0, 0) == pytest.approx(0.0)
+
+    def test_empirical_safety_margin_all_safe(self):
+        # No attacks succeed => margin = 1.0
+        assert compute_empirical_safety_margin([0.0, 0.0, 0.0]) == pytest.approx(1.0)
+
+    def test_empirical_safety_margin_all_unsafe(self):
+        # All attacks succeed => margin = 0.0
+        assert compute_empirical_safety_margin([1.0, 1.0, 1.0]) == pytest.approx(0.0)
+
+    def test_empirical_safety_margin_mixed(self):
+        # 50% attack success rate => margin = 0.5
+        assert compute_empirical_safety_margin([0.5, 0.5]) == pytest.approx(0.5)
+
+    def test_empirical_safety_margin_empty(self):
+        assert compute_empirical_safety_margin([]) == pytest.approx(0.0)
+
+    def test_rho_negative_zero_horizon(self):
+        # Negative rho should also give 0 (instant forgetting)
+        assert safety_memory_horizon(-0.5) == 0.0

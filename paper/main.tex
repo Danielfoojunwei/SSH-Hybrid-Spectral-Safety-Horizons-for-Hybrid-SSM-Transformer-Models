@@ -1373,20 +1373,29 @@ For a target safety horizon $H_{\mathrm{target}}$, the constraint $g < \epsilon_
 \section{Limitations and Future Work}
 \label{sec:limitations}
 
+\paragraph{Propositions rest on an unproven assumption.}
+The central claim---that safety margin degrades proportionally to the SSM hidden-state attenuation factor---is a hypothesis, not a proven bound. Hidden-state decay in SSM layers does not necessarily imply proportional output-level safety degradation, because attention layers, residual connections, and learned compensatory mechanisms may partially or fully offset the information loss. Proposition~1 should be treated as a testable prediction and validated against behavioral safety metrics (e.g., attack success rate) rather than assumed to hold.
+
+\paragraph{CHSS is a proxy, not a safety metric.}
+The Content-Hidden State Score measures representation shift via cosine similarity between clean and perturbed hidden states. This does not directly measure safety. A model could exhibit large representation shift yet remain behaviorally safe, or vice versa. Future work should validate CHSS against ground-truth behavioral metrics such as attack success rate or human judgement of output safety.
+
+\paragraph{Probe diversity is critical but not guaranteed.}
+The theoretical value of $K$ probes in MBCA depends on each probe detecting a distinct safety-relevant pattern. When trained with a single binary label broadcast to all $K$ probes, the result is $K$ near-identical classifiers rather than diverse detectors. Future implementations should use per-category harm labels (BeaverTails provides 14 categories) to ensure genuine probe diversity.
+
 \paragraph{Linear SSM assumption.}
-Theorem~1 relies on linear recurrence dynamics. Mamba-2 introduces selective scan dynamics (SSD) where $\bar{A}_t$ is input-dependent~\cite{dao2024mamba2}. Extensions to nonlinear SSMs may require bounding the spectral radius of the worst-case input-dependent operator.
+Proposition~1 relies on linear recurrence dynamics. Mamba-2 introduces selective scan dynamics (SSD) where $\bar{A}_t$ is input-dependent~\cite{dao2024mamba2}. Extensions to nonlinear SSMs may require bounding the spectral radius of the worst-case input-dependent operator.
 
 \paragraph{Training data coverage.}
 \MBCA{} probes are trained on BeaverTails~\cite{ji2023beavertails}, which underrepresents specialized domains (biosecurity, election interference). The coverage guarantee $\betaMBCA$ is only as strong as the per-probe detection rates, limited by the training distribution.
 
-\paragraph{Bound tightness.}
-Theorem~1 is tight in the worst case but may be loose for specific architectures where safety features distribute across multiple eigenmodes. Characterizing the tightness gap as a function of architecture design remains open.
+\paragraph{Evaluation scale.}
+Rigorous validation requires evaluation on hundreds to thousands of samples from established adversarial benchmarks (HarmBench, AdvBench), not small handcrafted sets. Statistical significance testing (bootstrap confidence intervals) should accompany all reported metrics.
+
+\paragraph{Inference overhead measurement.}
+The overhead claim requires KV-cache-enabled generation. Without KV cache, the MBCA monitor performs a full forward pass at each token, making overhead $O(n)$ per token rather than $O(1)$. Actual overhead should be measured empirically.
 
 \paragraph{Multi-modal extension.}
 The framework is developed for text-only models. Multi-modal hybrids with vision/audio tokens may exhibit different SSM decay interactions not captured by single-modality analysis.
-
-\paragraph{Adaptive probe selection.}
-Fixed $K$ probes trained offline could be replaced by adaptive variants that select or weight probes dynamically, potentially achieving higher coverage with fewer probes.
 
 \paragraph{Formal verification connections.}
 Connecting spectral safety bounds to formal verification methods (abstract interpretation, satisfiability-based analysis) could yield stronger worst-case guarantees.
@@ -1506,15 +1515,16 @@ Jiaming Ji et al.
 BeaverTails: Towards improved safety alignment of LLM via a human-preference dataset.
 In \emph{NeurIPS}, 2023.
 
-\bibitem{wang2024spectralguard}
-Martin Le~Mercier, Ana\"{i}s Vergne, and Cl\'{e}ment Beysson.
-SpectralGuard: Spectral analysis for state space model safety.
-\emph{arXiv preprint}, 2026.
-
-\bibitem{lemercier2025robench}
-Martin Le~Mercier, Ana\"{i}s Vergne, and Cl\'{e}ment Beysson.
-RoBench-25: Robustness benchmarking for large language models.
-In \emph{EMNLP}, 2025.
+% NOTE: The following references were self-citations to unpublished work
+% by the same authors. They have been replaced with notes indicating that
+% the spectral measurement methodology and attack evaluation framework
+% are contributions of THIS paper, not independently validated external work.
+%
+% \bibitem{wang2024spectralguard}
+% [Removed: self-citation to unpublished work by same authors]
+%
+% \bibitem{lemercier2025robench}
+% [Removed: self-citation to unpublished work by same authors]
 
 \bibitem{kalman1960}
 Rudolf E. Kalman.

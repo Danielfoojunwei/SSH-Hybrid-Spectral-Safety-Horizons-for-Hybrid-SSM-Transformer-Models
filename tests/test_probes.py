@@ -95,8 +95,8 @@ class TestSafetyProbeTraining:
 
         assert len(probes) == K
 
-    def test_single_label_broadcast(self):
-        """Single label column is broadcast to all K probes."""
+    def test_single_label_broadcast_with_diversity_noise(self):
+        """Single label column is broadcast with noise for diversity."""
         n_samples = 100
         hidden_dim = 8
         K = 4
@@ -104,6 +104,7 @@ class TestSafetyProbeTraining:
         hidden_states = torch.randn(n_samples, hidden_dim)
         labels = (torch.randn(n_samples) > 0).float()
 
+        # Should emit a warning about redundant probes
         linear, probes = train_safety_probes(
             hidden_states=hidden_states,
             labels=labels,
@@ -115,3 +116,23 @@ class TestSafetyProbeTraining:
 
         assert linear.weight.shape == (K, hidden_dim)
         assert len(probes) == K
+
+    def test_mismatched_label_dim_raises(self):
+        """Label dimension not matching K should raise ValueError."""
+        n_samples = 100
+        hidden_dim = 8
+        K = 4
+
+        hidden_states = torch.randn(n_samples, hidden_dim)
+        # 3 label columns but K=4 probes
+        labels = torch.zeros(n_samples, 3)
+
+        with pytest.raises(ValueError, match="Label dimension"):
+            train_safety_probes(
+                hidden_states=hidden_states,
+                labels=labels,
+                K=K,
+                hidden_dim=hidden_dim,
+                epochs=5,
+                device="cpu",
+            )

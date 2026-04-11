@@ -1,7 +1,8 @@
 """Spectral radius measurement for SSM transition matrices.
 
-Implements Phase 1 of the architectural safety audit procedure,
-following SpectralGuard methodology (Le Mercier et al., March 2026).
+Implements Phase 1 of the architectural safety audit procedure.
+Extracts learned SSM parameters (A, delta) from model weights and
+computes spectral radius via eigendecomposition.
 """
 
 from __future__ import annotations
@@ -143,44 +144,148 @@ def compute_mean_spectral_radius(results: list[SpectralRadiusResult]) -> float:
     return float(np.mean([r.spectral_radius for r in results]))
 
 
+def _extract_learned_delta(module: torch.nn.Module, state_dim: int) -> torch.Tensor:
+    """Extract the learned discretization step size from an SSM layer.
+
+    Mamba-class models learn delta via a dt_proj linear layer. We use the
+    bias (or a forward pass with a zero input) to get a representative
+    delta value. Falls back to dt_init values or a default if unavailable.
+
+    Args:
+        module: An SSM layer module (e.g., a Mamba mixer block).
+        state_dim: Dimension of the SSM state (for fallback shape).
+
+    Returns:
+        delta tensor of shape (state_dim,) or scalar.
+    """
+    device = next(module.parameters()).device
+
+    # Try to read dt_proj bias as the learned baseline delta
+    if hasattr(module, "dt_proj") and module.dt_proj is not None:
+        dt_proj = module.dt_proj
+        if hasattr(dt_proj, "bias") and dt_proj.bias is not None:
+            # dt_proj.bias gives the baseline step size before softplus
+            raw_delta = dt_proj.bias.data.float()
+            # Mamba applies softplus to get positive delta
+            delta = torch.nn.functional.softplus(raw_delta)
+            # dt_proj maps from inner_dim to state_dim; bias is (dt_rank,)
+            # Use mean as representative step size
+            return delta.mean().expand(state_dim)
+
+    # Try D parameter or dt-related attributes (Mamba-2 variants)
+    if hasattr(module, "D") and hasattr(module, "dt_bias"):
+        raw_delta = module.dt_bias.data.float()
+        delta = torch.nn.functional.softplus(raw_delta)
+        return delta.mean().expand(state_dim)
+
+    # Fallback: use a conservative default with a warning
+    import logging
+    logging.getLogger(__name__).warning(
+        "Could not extract learned delta from %s, using default=1.0 "
+        "(no discretization). Spectral radius will be computed on "
+        "continuous A matrix directly.",
+        type(module).__name__,
+    )
+    return torch.ones(state_dim, device=device)
+
+
 def _extract_ssm_layers(
     model: torch.nn.Module,
     model_type: str,
 ) -> list[dict[str, torch.Tensor]]:
     """Extract SSM layer parameters (A, delta) from a model.
 
+    Handles architecture-specific parameter locations:
+    - Mamba: A_log in each MambaBlock, delta via dt_proj
+    - Jamba: Mamba layers interleaved 7:1 with attention in MoE blocks
+    - Zamba: Mamba layers with shared attention block
+
     Args:
         model: The loaded model.
         model_type: One of 'jamba', 'zamba', 'mamba'.
 
     Returns:
-        List of dicts with 'A' and optionally 'delta' tensors.
+        List of dicts with 'A' and 'delta' tensors per SSM layer.
     """
     layers = []
 
     if model_type == "mamba":
+        # Pure Mamba: every layer is SSM with A_log and dt_proj
         for name, module in model.named_modules():
             if hasattr(module, "A_log"):
                 A = -torch.exp(module.A_log.float())
-                delta = (
-                    torch.ones(A.shape[-1], device=A.device)
-                    if not hasattr(module, "dt_proj")
-                    else torch.ones(A.shape[-1], device=A.device) * 0.1
-                )
-                layers.append({"A": A.mean(dim=0) if A.ndim > 1 else A, "delta": delta})
+                A_flat = A.mean(dim=0) if A.ndim > 1 else A
+                delta = _extract_learned_delta(module, A_flat.shape[-1])
+                layers.append({"A": A_flat, "delta": delta})
 
     elif model_type == "jamba":
+        # Jamba: MoE architecture with interleaved Mamba and attention layers.
+        # Mamba layers are in JambaMambaDecoderLayer blocks (7 out of every 8).
+        # Navigate the model hierarchy to find SSM-specific layers.
         for name, module in model.named_modules():
+            # Jamba's Mamba layers contain A_log in the mamba mixer
             if hasattr(module, "A_log"):
                 A = -torch.exp(module.A_log.float())
-                delta = torch.ones(A.shape[-1], device=A.device) * 0.1
-                layers.append({"A": A.mean(dim=0) if A.ndim > 1 else A, "delta": delta})
+                A_flat = A.mean(dim=0) if A.ndim > 1 else A
+                delta = _extract_learned_delta(module, A_flat.shape[-1])
+                layers.append({
+                    "A": A_flat,
+                    "delta": delta,
+                    "layer_name": name,
+                })
 
     elif model_type == "zamba":
+        # Zamba: Uses shared attention layers interleaved with Mamba blocks.
+        # The Mamba blocks have their own A_log and dt parameters.
+        # Zamba's architecture differs from Jamba in using a shared attention
+        # block rather than per-layer attention.
         for name, module in model.named_modules():
             if hasattr(module, "A_log"):
                 A = -torch.exp(module.A_log.float())
-                delta = torch.ones(A.shape[-1], device=A.device) * 0.1
-                layers.append({"A": A.mean(dim=0) if A.ndim > 1 else A, "delta": delta})
+                A_flat = A.mean(dim=0) if A.ndim > 1 else A
+                delta = _extract_learned_delta(module, A_flat.shape[-1])
+                layers.append({
+                    "A": A_flat,
+                    "delta": delta,
+                    "layer_name": name,
+                })
 
     return layers
+
+
+def compute_r_ssm_from_model(
+    model: torch.nn.Module,
+    model_type: str,
+) -> float:
+    """Compute r_SSM (SSM layer fraction) by introspecting model architecture.
+
+    Counts SSM vs attention layers to validate the hardcoded r_ssm values
+    in the model config.
+
+    Args:
+        model: The loaded model.
+        model_type: Architecture type.
+
+    Returns:
+        Fraction of layers that are SSM (0.0 to 1.0).
+    """
+    if model_type == "pythia":
+        return 0.0
+
+    n_ssm = 0
+    n_attention = 0
+
+    for name, module in model.named_modules():
+        module_type = type(module).__name__.lower()
+        # Count SSM layers (look for Mamba-related modules)
+        if hasattr(module, "A_log") and ("mamba" in module_type or "ssm" in module_type
+                                          or "mixer" in module_type):
+            n_ssm += 1
+        # Count attention layers
+        elif "attention" in module_type and hasattr(module, "q_proj"):
+            n_attention += 1
+
+    total = n_ssm + n_attention
+    if total == 0:
+        return 0.0
+    return n_ssm / total

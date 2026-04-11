@@ -34,7 +34,14 @@ def safety_memory_horizon(
         H(rho) in tokens. Returns float('inf') if rho == 0 (no decay)
         or rho >= 1 (no convergence — pure Transformer).
     """
-    if rho <= 0.0 or rho >= 1.0:
+    if rho <= 0.0:
+        # rho=0 means A_bar=0: hidden state is zeroed every step.
+        # This is instant total forgetting — memory horizon is 0.
+        return 0.0
+
+    if rho >= 1.0:
+        # rho>=1 means no contraction (pure Transformer-like behavior
+        # or unstable dynamics). Safety signals never decay.
         return float("inf")
 
     return math.log(1.0 / epsilon) / math.log(1.0 / rho)
