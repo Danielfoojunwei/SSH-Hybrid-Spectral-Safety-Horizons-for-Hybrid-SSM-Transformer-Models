@@ -82,7 +82,7 @@ def create_padded_prompt(prompt: str, distance: int, tokenizer) -> str:
 
 
 def run_cpu_validation(
-    model_name: str = "gpt2",
+    model_name: str = "qwen2.5-0.5b-instruct",
     distances: list[int] | None = None,
     max_new_tokens: int = 100,
     output_dir: str = "results/cpu_validation",
@@ -291,7 +291,7 @@ def run_cpu_validation(
 
 def main():
     parser = argparse.ArgumentParser(description="CPU Pipeline Validation")
-    parser.add_argument("--model", default="gpt2")
+    parser.add_argument("--model", default="qwen2.5-0.5b-instruct")
     parser.add_argument("--distances", nargs="+", type=int, default=None)
     parser.add_argument("--max-new-tokens", type=int, default=100)
     parser.add_argument("--output-dir", default="results/cpu_validation")

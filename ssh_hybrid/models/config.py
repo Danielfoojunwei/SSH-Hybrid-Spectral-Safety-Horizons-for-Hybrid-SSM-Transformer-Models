@@ -60,36 +60,37 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         role="ssm_baseline",
     ),
     # Lightweight models for CPU testing / pipeline validation
+    # Qwen2.5-0.5B-Instruct: modern, instruction-tuned with safety alignment,
+    # small enough for CPU. This is the recommended CPU test model because it
+    # has real safety training (unlike GPT-2 which has none).
+    "qwen2.5-0.5b-instruct": ModelConfig(
+        name="qwen2.5-0.5b-instruct",
+        hf_model_id="/tmp/qwen_model",
+        model_type="pythia",  # pure transformer architecture
+        r_ssm=0.0,
+        params_billions=0.5,
+        vram_gb_bf16=1.0,
+        role="cpu_test_instruction_tuned",
+        torch_dtype="float32",
+    ),
+    "qwen2.5-1.5b-instruct": ModelConfig(
+        name="qwen2.5-1.5b-instruct",
+        hf_model_id="Qwen/Qwen2.5-1.5B-Instruct",
+        model_type="pythia",  # pure transformer
+        r_ssm=0.0,
+        params_billions=1.5,
+        vram_gb_bf16=3.0,
+        role="instruction_tuned_baseline",
+        torch_dtype="float32",
+    ),
     "gpt2": ModelConfig(
         name="gpt2",
         hf_model_id="openai-community/gpt2",
-        model_type="pythia",  # pure transformer architecture
+        model_type="pythia",
         r_ssm=0.0,
         params_billions=0.124,
         vram_gb_bf16=0.25,
-        role="cpu_test_transformer",
-        torch_dtype="float32",
-    ),
-    "pythia-160m": ModelConfig(
-        name="pythia-160m",
-        hf_model_id="EleutherAI/pythia-160m",
-        model_type="pythia",
-        r_ssm=0.0,
-        params_billions=0.160,
-        vram_gb_bf16=0.32,
-        role="cpu_test_transformer",
-        torch_dtype="float32",
-    ),
-    # Gemma models — instruction-tuned, so they have real safety training
-    # to test against (unlike GPT-2 which has no safety alignment)
-    "gemma-3-1b-it": ModelConfig(
-        name="gemma-3-1b-it",
-        hf_model_id="google/gemma-3-1b-it",
-        model_type="pythia",  # pure transformer
-        r_ssm=0.0,
-        params_billions=1.0,
-        vram_gb_bf16=2.0,
-        role="instruction_tuned_baseline",
+        role="cpu_test_no_safety",
         torch_dtype="float32",
     ),
 }
