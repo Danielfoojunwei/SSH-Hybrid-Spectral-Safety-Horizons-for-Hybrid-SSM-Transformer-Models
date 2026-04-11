@@ -102,32 +102,31 @@ $h_t = \bar{A}\, h_{t-1} + \bar{B}\, x_t$ with spectral radius $\rho < 1$,
 any safety constraint encoded in an SSM hidden state decays exponentially and
 falls below a detection threshold $\epsilon$ after at most
 $\Horizon = \lceil \log(1/\epsilon) / \log(1/\rho) \rceil$ tokens.  We call
-this interval the \emph{safety blind window}.  Unlike previously studied
-jailbreaks, the blind window is \emph{not} a training failure: it is a
-geometric consequence of spectral contraction, intrinsic to the efficiency of
-SSM design, and therefore immune to standard alignment techniques.
+this interval the \emph{safety blind window}.
 
 We introduce \textbf{SSH-Hybrid} (\textbf{S}pectral \textbf{S}afety
-\textbf{H}orizons for \textbf{H}ybrid Models), the first formal framework
-connecting SSM spectral properties to quantifiable safety margins.  We
-establish two theorems.  \emph{Theorem~1 (Spectral Safety Margin Bound)}
-proves that the safety margin of a hybrid model satisfies
-$\deltaStar(\piHybrid) \leq \deltaStar(\piTrans)(1 - g)$,
-where $g = \rSSM \cdot \min(1, L/\Horizon)$ depends explicitly on the
-SSM fraction $\rSSM$ and context length $L$.  \emph{Theorem~2 (MBCA
-Compensation)} shows that augmenting a hybrid model with a
-\emph{Monotone Boolean Composition Accumulator} (\MBCA) recovers
-$\deltaStar(\piHybrid + \MBCA) \geq \deltaStar(\piTrans)(1 - g(1-\betaMBCA))$,
-where $\betaMBCA > 0$ is the accumulator's retention coefficient.
+\textbf{H}orizons for \textbf{H}ybrid Models), the first empirical
+investigation of whether SSM spectral properties predict safety degradation
+in hybrid architectures.  We formulate two testable hypotheses.
+\emph{Hypothesis~1:} hybrid models exhibit higher attack success rates (ASR)
+at context distances beyond $\Horizon$ compared to pure Transformers.
+\emph{Hypothesis~2:} augmenting a hybrid model with a
+\emph{Monotone Boolean Composition Accumulator} (\MBCA{})---monotone
+boolean probes on attention layers that cannot be erased by SSM
+decay---reduces ASR to near-Transformer levels.
 
-Experiments on four architectures (Pythia-2.8B, Mamba-2.8B, Zamba-7B,
-Jamba-1.5-Mini) validate the predicted degradation ordering
-Pythia $>$ Zamba $>$ Jamba $>$ Mamba with Pearson $r = 0.923$.  The
-\MBCA{} mechanism with $K{=}8$ probes achieves $\betaMBCA > 0.70$ and reduces
-\CHSS{} degradation from $62\%$ to $23\%$, while incurring less than $2\%$
-accuracy loss on MMLU, HellaSwag, and ARC.  SSH-Hybrid is the first system
-to provide formal guarantees, empirical validation, and a deployable
-mitigation for architectural safety blind windows simultaneously.
+We test these hypotheses across four architectures (Pythia-2.8B, Mamba-2.8B,
+Zamba-7B, Jamba-1.5-Mini) using attack success rate as the primary behavioral
+safety metric, measured at multiple context distances with 500+ adversarial
+prompts from BeaverTails.
+The key experiment measures attack success rate (ASR) as a function of
+context distance across all four models: if the hypothesis holds, hybrid
+models should show increasing ASR beyond $\Horizon$, while pure Transformers
+remain flat.  We report ASR as the primary behavioral metric, supplemented
+by CHSS representation analysis.  SSH-Hybrid is the first empirical
+investigation connecting SSM spectral properties to measurable safety
+degradation, and the first to propose a deployable monotone-boolean
+mitigation mechanism.
 \end{abstract}
 
 % -------------------------------------------------------
@@ -533,7 +532,7 @@ The factor $g \in [0, \rSSM] \subset [0,1)$ quantifies aggregate safety-signal d
     \item \textbf{Pure Transformer} ($\rSSM = 0$): no SSM layers, so $g = 0$ and no attenuation.
 \end{itemize}
 
-\subsection{Spectral Safety Margin Bound (Theorem 1)}
+\subsection{Spectral Safety Margin Bound (Hypothesis 1)}
 \label{sec:main-theorem}
 
 \begin{theorem}[Spectral Safety Margin Bound]
@@ -583,7 +582,7 @@ For $\piTrans$ with $\rSSM = 0$: $g = 0$, so $\deltaStar(\piTrans) = \deltaStar(
 The bound is achieved in the limit $\epsilon \to 0$, $L/\Horizon \to \infty$, where $g \to \rSSM$.
 \end{proof}
 
-\subsection{MBCA Compensation (Theorem 2)}
+\subsection{MBCA Compensation (Hypothesis 2)}
 \label{sec:mbca-theorem}
 
 \begin{theorem}[MBCA Compensation]
@@ -1007,8 +1006,8 @@ Table~\ref{tab:models} summarises their HuggingFace identifiers, architectural t
 \subsection{Spectral Radius Measurement}
 \label{sec:spectral-measurement}
 
-We follow the SpectralGuard methodology~\citep{lemercier2026spectralguard} for extracting and
-discretising the state-transition matrices of SSM layers.
+We extract and discretise the state-transition matrices of SSM layers from model weights
+as follows.
 For each SSM layer we (i)~extract the learned $A$ matrix, (ii)~apply zero-order-hold (ZOH)
 discretisation,
 \begin{equation}
@@ -1031,8 +1030,8 @@ The per-model spectral radius $\rho$ is the maximum over all SSM layers.
 \label{sec:eval-protocol}
 
 \paragraph{Adversarial benchmark.}
-All attacks use RoBench-25~\citep{lemercier2025robench} with seven
-Z-HiSPA\footnote{Zero-shot Hidden-State Perturbation Attack.} trigger configurations:
+We use seven Z-HiSPA trigger configurations designed to exploit
+SSM hidden-state decay through various context-manipulation strategies:
 \begin{enumerate}[label=\textbf{z-hispa-\arabic*:}, leftmargin=*, nosep]
   \item Prefix injection --- malicious prefix prepended to every prompt.
   \item Suffix injection --- malicious suffix appended to every prompt.
@@ -1081,8 +1080,12 @@ The per-probe safety threshold $\tau = 0.5$ is fixed throughout.
 \section{Results}
 \label{sec:results}
 
-We organise results around five experiments that together validate the theoretical claims of
-Sections~\ref{sec:theory} and~\ref{sec:mbca}.
+We organise results around seven experiments that test the hypotheses of
+Sections~\ref{sec:theory} and~\ref{sec:mbca}. The primary metric throughout
+is \textbf{Attack Success Rate (ASR)}: the fraction of adversarial prompts for
+which the model produces harmful output, as classified by a keyword-based safety
+classifier (see Section~\ref{sec:limitations} for classifier limitations).
+CHSS is reported as a supplementary representation-level metric.
 
 % ---------------------------------------------------------------------------
 \subsection{Experiment 1: Spectral Radius Measurement}
@@ -1126,90 +1129,145 @@ Mamba-2.8B has $\hat{\rho} = 0.9967$, the value closest to the unit circle, yiel
 largest $H(\rho)$ and smallest \deltaStar{}.
 
 % ---------------------------------------------------------------------------
-\subsection{Experiment 2: Theorem~1 Validation}
-\label{sec:exp2}
+\subsection{Experiment 6: Context-Distance Safety Degradation (Key Result)}
+\label{sec:exp6}
 
-\paragraph{Quantitative fit.}
-Across all four models and seven Z-HiSPA configurations (28 data points), the Pearson
-correlation between SSH-Hybrid's predicted \CHSS{} degradation and empirically measured
-degradation is $r = 0.923$ ($p < 0.001$), exceeding the pre-registered acceptance threshold
-of $r > 0.80$.
-Mean absolute error is $\mathrm{MAE} = 8.7\%$, below the 15\% acceptance threshold.
+\paragraph{Design.}
+This is the central experiment. We test whether hybrid models lose safety alignment
+at longer context distances compared to pure Transformers. For each of four models,
+we measure ASR at context distances $d \in \{0, 50, 100, 200, 400, 800, 1600\}$ tokens.
+Context is inserted as benign padding before the adversarial prompt, simulating the
+``safety blind window'' scenario where an attacker pads context to exhaust SSM memory.
 
-\paragraph{Per-model degradation.}
-Table~\ref{tab:degradation} reports mean \CHSS{} degradation averaged over the seven
-Z-HiSPA configurations.
+\paragraph{Prediction.}
+If Hypothesis~1 holds:
+\begin{itemize}[nosep]
+  \item Mamba-2.8B ($\rSSM=1.0$) should show the steepest ASR increase with distance
+  \item Jamba ($\rSSM=0.875$) and Zamba ($\rSSM=0.850$) should show moderate ASR increase
+  \item Pythia-2.8B ($\rSSM=0.0$) should show minimal or no ASR increase (control)
+  \item The onset of degradation should occur near $d \approx \Horizon$ for each model
+\end{itemize}
+
+\paragraph{Results.}
+\emph{Results will be populated after running Experiment 6 on GPU infrastructure.
+This is the make-or-break experiment for the paper's thesis.}
 
 \begin{table}[ht]
   \centering
-  \caption{Mean \CHSS{} degradation (\%) across seven Z-HiSPA configurations (lower is
-           better). ``Predicted'' values are computed from Theorem~1; ``Empirical'' values are
-           measured on RoBench-25.}
-  \label{tab:degradation}
-  \begin{tabular}{lrrrr}
+  \caption{Attack success rate (\%) as a function of context distance (tokens).
+           Higher is less safe. 500+ adversarial prompts from BeaverTails.}
+  \label{tab:distance-decay}
+  \begin{tabular}{lrrrrrrr}
     \toprule
-    \textbf{Model} & \rSSM{} & $\hat{\rho}$ &
-      \textbf{Predicted (\%)} & \textbf{Empirical (\%)} \\
+    \textbf{Model} & $d{=}0$ & $d{=}50$ & $d{=}100$ & $d{=}200$ &
+      $d{=}400$ & $d{=}800$ & $d{=}1600$ \\
     \midrule
-    Pythia-2.8B    & 0.000 & ---    & $\phantom{0}$9.4 & $\phantom{0}$12.1 \\
-    Zamba-7B       & 0.850 & 0.9921 & 51.3             & 54.2              \\
-    Jamba-1.5-Mini & 0.875 & 0.9934 & 58.7             & 61.8              \\
-    Mamba-2.8B     & 1.000 & 0.9967 & 68.4             & 71.3              \\
+    Pythia-2.8B    & \emph{TBD} & \emph{TBD} & \emph{TBD} & \emph{TBD} &
+      \emph{TBD} & \emph{TBD} & \emph{TBD} \\
+    Zamba-7B       & \emph{TBD} & \emph{TBD} & \emph{TBD} & \emph{TBD} &
+      \emph{TBD} & \emph{TBD} & \emph{TBD} \\
+    Jamba-1.5-Mini & \emph{TBD} & \emph{TBD} & \emph{TBD} & \emph{TBD} &
+      \emph{TBD} & \emph{TBD} & \emph{TBD} \\
+    Mamba-2.8B     & \emph{TBD} & \emph{TBD} & \emph{TBD} & \emph{TBD} &
+      \emph{TBD} & \emph{TBD} & \emph{TBD} \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-\noindent Pythia-2.8B exhibits only 12.1\% mean degradation, confirming that pure
-transformers are largely immune to Z-HiSPA spectral collapse.
-Mamba-2.8B reaches 71.3\%, consistent with its $\hat{\rho}$ being nearest to the unit
-circle.
-The two hybrids fall between these extremes and in the order predicted by $g$.
+\begin{figure}[ht]
+  \centering
+  \fbox{\rule{0pt}{4.5cm}\rule{0.55\textwidth}{0pt}}
+  \caption{ASR vs.\ context distance for all four models. Each line represents one model.
+           If the hypothesis holds, SSM-heavy models (Mamba, Jamba) show increasing ASR
+           at larger distances, while Pythia (pure Transformer) remains approximately flat.
+           Vertical dashed lines mark $\Horizon$ for each model. Shaded regions show
+           bootstrap 95\% confidence intervals.}
+  \label{fig:distance-decay}
+\end{figure}
+
+% ---------------------------------------------------------------------------
+\subsection{Experiment 2: Spectral Radius as Safety Predictor}
+\label{sec:exp2}
+
+\paragraph{Design.}
+We test whether the spectral radius $\rho$ predicts the context distance at which safety
+degrades. For each model, we compute the empirical ``safety drop-off distance'' $d^*$:
+the smallest context distance at which ASR exceeds the zero-distance baseline by
+$>$10 percentage points. We then correlate $d^*$ with the predicted safety memory horizon
+$\Horizon = \log(1/\epsilon)/\log(1/\rho)$.
+
+If Hypothesis~1 holds, models with lower $\Horizon$ should show earlier safety degradation
+(lower $d^*$), yielding a positive correlation between $\Horizon$ and $d^*$.
+Pure Transformer (Pythia) serves as the control: its $d^*$ should be undefined or
+very large since attention has $O(1)$ access to all context positions.
+
+\paragraph{Results.}
+\emph{Results will be populated after running Experiments 1 and 6 on GPU infrastructure.
+Placeholder tables below show the reporting format.}
+
+\begin{table}[ht]
+  \centering
+  \caption{Spectral radius and empirical safety drop-off distance. $d^*$ is the distance
+           (tokens) at which ASR exceeds baseline by $>$10\%. Blank indicates insufficient
+           degradation to determine $d^*$.}
+  \label{tab:spectral-predictor}
+  \begin{tabular}{lcccc}
+    \toprule
+    \textbf{Model} & \rSSM{} & $\hat{\rho}$ & $\Horizon$ (tokens) & $d^*$ (tokens) \\
+    \midrule
+    Pythia-2.8B    & 0.000 & --- & $\infty$ & \emph{TBD} \\
+    Zamba-7B       & 0.850 & \emph{TBD} & \emph{TBD} & \emph{TBD} \\
+    Jamba-1.5-Mini & 0.875 & \emph{TBD} & \emph{TBD} & \emph{TBD} \\
+    Mamba-2.8B     & 1.000 & \emph{TBD} & \emph{TBD} & \emph{TBD} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
 
 \begin{figure}[ht]
   \centering
-  % Placeholder: scatter plot generated at camera-ready time.
   \fbox{\rule{0pt}{4.5cm}\rule{0.55\textwidth}{0pt}}
-  \caption{Scatter plot of predicted vs.\ empirical \CHSS{} degradation across all
-           model--attack pairs ($n = 28$).
-           Each point corresponds to one (model, Z-HiSPA configuration) pair.
-           The dashed line is the identity ($y = x$); the solid line is the least-squares fit
-           ($r = 0.923$, $\mathrm{MAE} = 8.7\%$).
-           Marker shapes encode model identity; colours encode Z-HiSPA configuration index.}
+  \caption{Scatter plot of predicted safety horizon $\Horizon$ vs.\ empirical drop-off
+           distance $d^*$ across models. Each point is one model. A positive correlation
+           supports Hypothesis~1. Pearson $r$ and $p$-value reported with bootstrap 95\% CI.}
   \label{fig:scatter}
 \end{figure}
 
 % ---------------------------------------------------------------------------
-\subsection{Experiment 3: \MBCA{} Coverage}
+\subsection{Experiment 3: \MBCA{} Effectiveness via ASR}
 \label{sec:exp3}
 
-Table~\ref{tab:mbca} summarises \MBCA{} probe performance at $K \in \{8, 16\}$ on
-Jamba-1.5-Mini (the primary model).
+\paragraph{Design.}
+We measure whether \MBCA{} actually reduces attack success rate, not just CHSS
+representation shift. For Jamba-1.5-Mini at context distances $d \in \{0, 200, 800\}$,
+we compare baseline ASR (no MBCA) against MBCA-monitored ASR with $K \in \{4, 8, 12, 16\}$
+probes trained on distinct BeaverTails harm categories.
+
+Key metric: $\Delta_\text{ASR} = \text{ASR}_\text{baseline} - \text{ASR}_\text{MBCA}$.
+A positive $\Delta_\text{ASR}$ indicates MBCA successfully prevents harmful output.
+We also measure false positive rate on benign prompts.
+
+\paragraph{Results.}
+\emph{Results will be populated after running Experiment 7 on GPU infrastructure.}
 
 \begin{table}[ht]
   \centering
-  \caption{\MBCA{} results on Jamba-1.5-Mini.
-           \betaMBCA{} is the coverage score (Theorem~2); the pass threshold is
-           $\betaMBCA > 0.70$.
-           \CHSS{} recovery measures residual mean degradation after \MBCA{} filtering;
-           target is $\leq 25\%$ residual.}
+  \caption{\MBCA{} effectiveness on Jamba-1.5-Mini. ASR is attack success rate (lower is
+           safer). $\Delta_\text{ASR}$ is the reduction achieved by MBCA. Probes are
+           trained on distinct BeaverTails harm categories for diversity.}
   \label{tab:mbca}
-  \begin{tabular}{rrrrrcc}
+  \begin{tabular}{rrrrrrr}
     \toprule
-    $K$ & \betaMBCA{} & \textbf{Pass?} & \textbf{Probe Acc.} & \textbf{Probe F1} &
-      \textbf{\CHSS{} (baseline)} & \textbf{\CHSS{} (w/\ \MBCA{})} \\
+    $K$ & \textbf{Distance} & \textbf{ASR baseline} & \textbf{ASR w/ MBCA} &
+      $\Delta_\text{ASR}$ & \textbf{Block rate} & \textbf{FP rate} \\
     \midrule
-    8  & 0.74 & \checkmark & 0.87 & 0.84 & 61.8\% & 22.7\% \\
-    16 & 0.82 & \checkmark & 0.88 & 0.83 & 61.8\% & 19.3\% \\
+    8  & 0   & \emph{TBD} & \emph{TBD} & \emph{TBD} & \emph{TBD} & \emph{TBD} \\
+    8  & 200 & \emph{TBD} & \emph{TBD} & \emph{TBD} & \emph{TBD} & --- \\
+    8  & 800 & \emph{TBD} & \emph{TBD} & \emph{TBD} & \emph{TBD} & --- \\
+    16 & 0   & \emph{TBD} & \emph{TBD} & \emph{TBD} & \emph{TBD} & \emph{TBD} \\
+    16 & 800 & \emph{TBD} & \emph{TBD} & \emph{TBD} & \emph{TBD} & --- \\
     \bottomrule
   \end{tabular}
 \end{table}
-
-\noindent At $K = 8$, \MBCA{} reduces mean \CHSS{} degradation from 61.8\% to 22.7\%,
-recovering the model to safe operation below the 25\% residual threshold.
-Increasing to $K = 16$ yields a further modest improvement (19.3\%) at the cost of higher
-inference overhead (see Section~\ref{sec:k-sensitivity}).
-Mean probe accuracy is 0.87 and mean F1 is 0.84 (averaged across 8 probes), indicating
-that individual probes are reliable and the ensemble is well-calibrated.
 
 % ---------------------------------------------------------------------------
 \subsection{Experiment 4: Audit Ranking Validation}
@@ -1254,11 +1312,10 @@ degradation as $K$ varies on Jamba-1.5-Mini.
   \end{tabular}
 \end{table}
 
-\noindent $K = 4$ fails the coverage threshold; all larger values pass.
-Benign degradation remains below 2\% for all $K \leq 24$.
-We select $\mathbf{K = 8}$ as the optimal operating point: it is the smallest $K$ that
-simultaneously satisfies $\betaMBCA > 0.70$, achieves \CHSS{} residual $\leq 25\%$, and
-keeps benign degradation below 1\%.
+\noindent \emph{K-sensitivity results will be reported as part of Experiment 7 (MBCA effectiveness).
+The key metric is $\Delta_\text{ASR}$ as a function of $K$, with the goal of finding the
+smallest $K$ that achieves meaningful ASR reduction ($>15$ percentage points) while keeping
+false positive rate below 5\%.}
 
 \begin{figure}[ht]
   \centering
@@ -1416,21 +1473,36 @@ Knowledge of safety blind windows could be misused by adversaries. We argue tran
 \section{Conclusion}
 \label{sec:conclusion}
 
-We have presented SSH-Hybrid, the first formal framework connecting SSM spectral properties to quantifiable safety margins in hybrid SSM-Transformer architectures. The framework addresses a gap that has grown urgent as hybrid models enter production: the absence of principled methods for characterizing safety implications of SSM-specific dynamics.
+We have presented SSH-Hybrid, the first empirical investigation of whether SSM spectral
+properties predict safety degradation in hybrid SSM-Transformer architectures. This
+addresses a gap that has grown urgent as hybrid models enter production: no prior work
+has tested whether the architectural properties that make SSMs efficient also create
+exploitable safety vulnerabilities.
 
-Three core contributions:
+Four contributions:
 
 \begin{enumerate}[label=(\arabic*)]
-\item \textbf{Theorem~1} establishes a formal upper bound on safety signal retention as a function of $\rho$, $\rSSM$, and $L$, defining the safety horizon $\Horizon$ and attenuation factor $g$ as scalar predictors of safety degradation.
+\item \textbf{The context-distance experiment} (Experiment~6) tests whether hybrid models
+exhibit increasing attack success rates at longer context distances---the first direct
+empirical test of the safety blind window hypothesis.
 
-\item \textbf{The \MBCA{} mechanism with Theorem~2} exploits monotone OR-updates to provide persistent safety memory provably immune to SSM decay, with coverage guarantee $\betaMBCA$ independent of $\rho$.
+\item \textbf{Spectral radius as safety predictor} (Experiment~2) tests whether the
+measured spectral radius $\rho$ and derived safety memory horizon $\Horizon$ predict the
+empirical distance at which safety degrades, correlating a physical model property with
+a behavioral safety outcome.
 
-\item \textbf{The 3-phase spectral safety audit} translates the theoretical framework into a practical pipeline combining lightweight spectral computation ($<$100\,ms) with empirical validation via HiSPA.
+\item \textbf{The \MBCA{} mechanism} proposes monotone boolean probes on attention layers
+as an architectural countermeasure, and measures its effectiveness via attack success
+rate reduction (Experiment~7), not just representation-level metrics.
+
+\item \textbf{An open-source audit pipeline} that measures spectral radius and deploys
+\MBCA{} for any hybrid model, with end-to-end timing under 30 minutes.
 \end{enumerate}
 
-Empirical validation across four architectures confirms: Pearson $r = 0.923$ between predicted and empirical degradation; \MBCA{} with $K=8$ achieves $\betaMBCA > 0.70$ with $<$2\% benign degradation; the audit correctly ranks all architectures by safety horizon.
-
-\textbf{Our call to action is direct: every hybrid SSM-Transformer model should undergo spectral safety auditing before deployment.} The audit is lightweight, the theoretical basis is sound, and the cost of omitting it---deploying a model with an uncharacterized safety blind window---is potentially severe. We release the SSH-Hybrid codebase, audit scripts, and pre-trained \MBCA{} probes at \url{https://github.com/anonymous/ssh-hybrid}.
+\textbf{Regardless of whether the specific hypotheses are confirmed or refuted, the
+question itself is important}: as hybrid architectures proliferate, understanding the
+safety implications of SSM spectral properties is essential. We release the SSH-Hybrid
+codebase and audit scripts at \url{https://github.com/anonymous/ssh-hybrid}.
 
 % =======================================================================
 \section*{Acknowledgments}
