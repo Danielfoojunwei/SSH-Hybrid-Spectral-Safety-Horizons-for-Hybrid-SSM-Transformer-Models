@@ -41,9 +41,9 @@
 \usepackage{makecell}
 
 % -------------------------------------------------------
-% Theorem environments
+% Theorem/Hypothesis environments
 % -------------------------------------------------------
-\newtheorem{theorem}{Theorem}[section]
+\newtheorem{theorem}{Hypothesis}[section]
 \newtheorem{definition}[theorem]{Definition}
 \newtheorem{lemma}[theorem]{Lemma}
 \newtheorem{corollary}[theorem]{Corollary}
@@ -220,7 +220,7 @@ compensating mitigation.  Our contributions are:
 
 \begin{enumerate}[label=(\roman*), leftmargin=*, itemsep=2pt]
 
-  \item \textbf{Theorem~1 (Spectral Safety Margin Bound).}  We prove that for
+  \item \textbf{Hypothesis~1 (Spectral Safety Margin Bound).}  We hypothesize that for
     any hybrid model with SSM fraction $\rSSM$ and context length $L$, the
     safety margin satisfies
     \begin{equation}
@@ -232,11 +232,11 @@ compensating mitigation.  Our contributions are:
     architectural parameters: the SSM-layer fraction $\rSSM$, the context
     length $L$, and the spectral radius $\rho$ (through $\Horizon$).
 
-  \item \textbf{Theorem~2 (MBCA Compensation).}  We design the
+  \item \textbf{Hypothesis~2 (MBCA Compensation).}  We design the
     \emph{Monotone Boolean Composition Accumulator} (\MBCA{}), a lightweight
     safety monitoring module that maintains a Boolean safety state via
     monotone OR updates: once a safety detection is recorded, it cannot be
-    forgotten regardless of subsequent SSM state decay.  We prove that
+    forgotten regardless of subsequent SSM state decay.  We hypothesize that
     \begin{equation}
       \deltaStar(\piHybrid + \MBCA) \;\geq\; \deltaStar(\piTrans)
       \,(1 - g(1 - \betaMBCA)),
@@ -273,7 +273,7 @@ for safety blind windows in hybrid SSM-Transformer models simultaneously.
 Section~\ref{sec:related} surveys related work.
 Section~\ref{sec:background} establishes notation and background on SSM
 recurrence and safety margins.
-Section~\ref{sec:theory} presents Theorems~1 and~2 with full proofs.
+Section~\ref{sec:theory} presents Hypotheses~1 and~2 as testable predictions with motivation.
 Section~\ref{sec:mbca} describes the \MBCA{} architecture and audit procedure.
 Section~\ref{sec:experiments} reports empirical results.
 Section~\ref{sec:discussion} discusses limitations and broader impacts.
@@ -395,7 +395,7 @@ classifiers while the blind window targets recurrent state persistence.
 
 \subsection{Spectral Methods for Neural Network Safety}
 
-SpectralGuard~\cite{wang2024spectralguard} applied spectral analysis of weight
+Prior work has applied spectral analysis of weight
 matrices to detect adversarial inputs in vision models, establishing a precedent
 for using eigenvalue structure as a safety signal.  Spectral norm
 regularization~\cite{miyato2018spectral} is a standard technique for stabilizing
@@ -438,7 +438,7 @@ provable retention guarantees.  SSH-Hybrid provides all three.
     Repr.\ Eng.~\cite{zou2023representation}& $\times$ & $\times$ & $\sim$   & \checkmark & $\times$ \\
     GCG~\cite{zou2023universal}             & $\times$ & $\times$ & $\sim$   & $\times$   & $\times$ \\
     Many-shot~\cite{anil2024many}           & $\times$ & $\times$ & $\times$ & $\times$   & \checkmark \\
-    SpectralGuard~\cite{wang2024spectralguard} & $\sim$ & $\times$ & $\times$ & $\sim$ & $\times$ \\
+    Spectral norm methods~\cite{miyato2018spectral} & $\sim$ & $\times$ & $\times$ & $\sim$ & $\times$ \\
     \midrule
     \textbf{SSH-Hybrid (ours)}              & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark \\
     \bottomrule
@@ -587,7 +587,7 @@ The bound is achieved in the limit $\epsilon \to 0$, $L/\Horizon \to \infty$, wh
 
 \begin{theorem}[MBCA Compensation]
 \label{thm:mbca-comp}
-Let $\piHybrid$ be as in Theorem~\ref{thm:margin-bound}, and let $\piHybrid + \MBCA$ denote the augmented policy with coverage $\betaMBCA \in [0,1]$. Then
+Let $\piHybrid$ be as in Hypothesis~\ref{thm:margin-bound}, and let $\piHybrid + \MBCA$ denote the augmented policy with coverage $\betaMBCA \in [0,1]$. Then
 \begin{equation}
     \deltaStar(\piHybrid + \MBCA) \;\geq\; \deltaStar(\piTrans) \cdot \bigl(1 - g \cdot (1 - \betaMBCA)\bigr).
     \label{eq:mbca-comp-formal}
@@ -596,7 +596,7 @@ Let $\piHybrid$ be as in Theorem~\ref{thm:margin-bound}, and let $\piHybrid + \M
 
 \begin{proof}
 \noindent\textbf{Step 1: Deficit definition.}
-From Theorem~\ref{thm:margin-bound}, the safety margin deficit is:
+From Hypothesis~\ref{thm:margin-bound}, the predicted safety margin deficit is:
 \begin{equation}
     \Delta_{\mathrm{def}} = \deltaStar(\piTrans) - \deltaStar(\piHybrid) \geq \deltaStar(\piTrans) \cdot g.
 \end{equation}
@@ -614,7 +614,7 @@ The compensated margin combines the unaugmented hybrid margin with the fraction 
 \end{align}
 
 \noindent\textbf{Step 4: Boundary cases.}
-$\betaMBCA = 0$: reduces to Theorem~\ref{thm:margin-bound}. $\betaMBCA = 1$: $\deltaStar(\piHybrid + \MBCA) \geq \deltaStar(\piTrans)$, full recovery.
+$\betaMBCA = 0$: reduces to Hypothesis~\ref{thm:margin-bound}. $\betaMBCA = 1$: $\deltaStar(\piHybrid + \MBCA) \geq \deltaStar(\piTrans)$, predicted full recovery.
 \end{proof}
 
 \subsection{Sufficient Coverage for Near-Baseline Safety}
@@ -886,7 +886,7 @@ phases described in Algorithm~\ref{alg:audit}.
 \State
 \State \textbf{// Phase 2: Safety Margin Computation}
 \State Compute safety gap $g \leftarrow \deltaStar(\piTrans{}) - \deltaStar(\piHybrid{})$
-\Comment{Theorem~\ref{thm:main}}
+\Comment{Hypothesis~\ref{thm:main}}
 \If{$g \geq g_{\min}$}
   \State \Return \textsc{Certified-Safe} (spectral margin sufficient)
 \Else
@@ -920,7 +920,7 @@ practice this completes in under 100\,ms for models with $d \leq 4096$ and
 $N \leq 64$ SSM layers.
 
 \paragraph{Phase 2 --- Safety margin computation.}
-Using Theorem~\ref{thm:main} we evaluate the predicted safety gap
+Using Hypothesis~\ref{thm:main} we evaluate the predicted safety gap
 $g = \deltaStar(\piTrans{}) - \deltaStar(\piHybrid{})$.  If $g \geq g_{\min}$
 the spectral structure of \piHybrid{} already provides sufficient margin and the
 audit terminates with a certificate.  Otherwise, we use the closed-form
@@ -1279,7 +1279,7 @@ The SSH-Hybrid audit ranking, derived analytically from $g$, is
   \succ \underbrace{\text{Mamba}}_{\text{most vulnerable}}.
 \]
 This ordering matches the empirical ranking obtained by sorting models on mean \CHSS{}
-degradation (Table~\ref{tab:degradation}), confirming Theorem~1's ranking corollary.
+degradation (Table~\ref{tab:degradation}), consistent with Hypothesis~1's ranking prediction.
 The agreement holds across all seven Z-HiSPA configurations individually: no single
 configuration inverts any adjacent pair in the ranking.
 
@@ -1357,24 +1357,18 @@ guarantees, runtime overhead, and adversarial coverage.
       \textbf{\makecell{Runtime\\overhead}} &
       \textbf{Coverage} \\
     \midrule
-    SpectralGuard~\citep{lemercier2026spectralguard}
-      & Partial       & No                           & Low              & N/A                  \\
-    RoBench-25~\citep{lemercier2025robench}
-      & Yes (empirical) & No                         & High             & N/A                  \\
     Standard safety filters
       & No            & No                           & Medium           & $\approx$60\%        \\
     \textbf{SSH-Hybrid (ours)}
-      & \textbf{Yes}  & \textbf{Yes (Thm.~1\&2)}     & \textbf{Low ($<$100\,ms)} & \textbf{$>$70\%} \\
+      & \textbf{Yes}  & \textbf{Testable (Hyp.~1\&2)}     & \textbf{Low ($<$100\,ms)} & \textbf{$>$70\%} \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-\noindent SSH-Hybrid is the only framework that combines formal spectral guarantees
-(Theorems~1 and~2) with low runtime overhead and auditable coverage scores.
-SpectralGuard provides complementary spectral measurements but does not bound hidden-state
-degradation or offer coverage guarantees.
+\noindent SSH-Hybrid is the only framework that combines testable spectral hypotheses
+(Hypotheses~1 and~2) with low runtime overhead and auditable coverage scores.
 Standard safety filters achieve only $\approx$60\% coverage and are entirely blind to
-SSM-driven state collapse.
+SSM-driven state decay.
 
 
 % =======================================================================
@@ -1398,7 +1392,7 @@ Pure Transformers do not exhibit this vulnerability: attention provides $O(1)$ a
 
 The core insight of \MBCA{} is that SSM decay should not be \emph{corrected} within the SSM dynamics, but \emph{circumvented} by a parallel, non-decaying memory channel. Modifying the recurrence matrix $\bar{A}$ to slow decay (pushing $\rho \to 1$) is brittle: it degrades the model's ability to forget irrelevant context, disrupts learned representations, and provides no formal guarantee.
 
-\MBCA{} introduces monotone OR-updates over $K$ binary probe activations. Once probe $k$ fires, flag $c[k] = 1$ persists indefinitely, unaffected by subsequent SSM state evolution. Theorem~2 formalizes this: the \MBCA{} coverage guarantee $\betaMBCA$ holds \emph{independent} of $\rho$, $\rSSM$, and interaction length. This independence is the crucial property---\MBCA{}'s safety guarantee does not degrade as the architecture becomes more SSM-heavy or contexts grow longer.
+\MBCA{} introduces monotone OR-updates over $K$ binary probe activations. Once probe $k$ fires, flag $c[k] = 1$ persists indefinitely, unaffected by subsequent SSM state evolution. Hypothesis~2 predicts this: the \MBCA{} coverage $\betaMBCA$ should hold \emph{independent} of $\rho$, $\rSSM$, and interaction length. This independence is the crucial design property---\MBCA{}'s safety detection does not degrade as the architecture becomes more SSM-heavy or contexts grow longer.
 
 \subsection{Spectral Radius as a Safety Metric}
 
@@ -1421,7 +1415,7 @@ Any hybrid SSM-Transformer model should undergo spectral safety auditing before 
 With $K = 8$ probes, \MBCA{} achieves $\betaMBCA > 0.70$ with $< 1\%$ benign degradation on MMLU/HellaSwag/ARC. Overhead scales as $O(K \cdot d_{\mathrm{model}})$ per token, dominated by model computation.
 
 \paragraph{Generalizability.}
-The framework applies to any architecture with linear recurrence layers alternating with attention: Griffin~\cite{de2024griffin}, RWKV-hybrid~\cite{peng2023rwkv}, and future designs. As long as the recurrence has a well-defined spectral radius, Theorem~1 applies.
+The framework applies to any architecture with linear recurrence layers alternating with attention: Griffin~\cite{de2024griffin}, RWKV-hybrid~\cite{peng2023rwkv}, and future designs. As long as the recurrence has a well-defined spectral radius, the distance-decay hypothesis can be tested.
 
 \paragraph{Architecture design guidance.}
 For a target safety horizon $H_{\mathrm{target}}$, the constraint $g < \epsilon_{\mathrm{tol}}$ bounds the allowable $\rSSM$ as a function of $\rho$ and $L$. Designers can use this to choose SSM-to-attention ratios that maintain acceptable safety margins.

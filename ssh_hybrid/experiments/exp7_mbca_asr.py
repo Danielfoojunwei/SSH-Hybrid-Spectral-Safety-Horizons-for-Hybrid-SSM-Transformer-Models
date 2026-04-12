@@ -95,10 +95,11 @@ def create_padded_prompt(prompt: str, distance: int, tokenizer) -> str:
 
 def measure_asr_baseline(
     model, tokenizer, prompts, distance, device, max_new_tokens=256,
-) -> float:
-    """Measure ASR without MBCA."""
+) -> dict:
+    """Measure ASR without MBCA, with bootstrap 95% CI."""
+    from ssh_hybrid.evaluation.stats import compute_asr_with_ci
     model.eval()
-    n_unsafe = 0
+    is_unsafe_list = []
     for prompt in prompts:
         padded = create_padded_prompt(prompt, distance, tokenizer)
         inputs = tokenizer(padded, return_tensors="pt", truncation=True, max_length=2048).to(device)
@@ -109,9 +110,8 @@ def measure_asr_baseline(
                 continue
         gen_ids = outputs[0][inputs["input_ids"].shape[1]:]
         gen_text = tokenizer.decode(gen_ids, skip_special_tokens=True)
-        if not classify_output_safety(gen_text):
-            n_unsafe += 1
-    return n_unsafe / max(1, len(prompts))
+        is_unsafe_list.append(not classify_output_safety(gen_text))
+    return compute_asr_with_ci(is_unsafe_list)
 
 
 def measure_asr_with_mbca(
@@ -199,15 +199,19 @@ def run_experiment7(
     )
     hidden_dim = hidden_states.shape[1]
 
-    # Measure baseline ASR (no MBCA) at each distance
+    # Measure baseline ASR (no MBCA) at each distance with bootstrap CIs
     logger.info("Measuring baseline ASR...")
     baseline_results = {}
     for dist in distances:
-        asr = measure_asr_baseline(
+        asr_stats = measure_asr_baseline(
             model, tokenizer, eval_prompts, dist, effective_device,
         )
-        baseline_results[dist] = asr
-        logger.info("  Baseline ASR at dist=%d: %.1f%%", dist, asr * 100)
+        baseline_results[dist] = asr_stats
+        logger.info(
+            "  Baseline ASR at dist=%d: %.1f%% [95%% CI: %.1f%%–%.1f%%]",
+            dist, asr_stats["asr"] * 100,
+            asr_stats["ci_lower"] * 100, asr_stats["ci_upper"] * 100,
+        )
 
     # Test each K value
     all_results = []
@@ -243,7 +247,8 @@ def run_experiment7(
             asr_mbca, n_blocked = measure_asr_with_mbca(
                 monitor, tokenizer, eval_prompts, dist, effective_device,
             )
-            baseline_asr = baseline_results[dist]
+            baseline_stats = baseline_results[dist]
+            baseline_asr = baseline_stats["asr"]
             asr_reduction = baseline_asr - asr_mbca
 
             result = {
@@ -251,6 +256,8 @@ def run_experiment7(
                 "K": K,
                 "distance": dist,
                 "baseline_asr": baseline_asr,
+                "baseline_asr_ci_lower": baseline_stats["ci_lower"],
+                "baseline_asr_ci_upper": baseline_stats["ci_upper"],
                 "mbca_asr": asr_mbca,
                 "asr_reduction": asr_reduction,
                 "n_blocked": n_blocked,

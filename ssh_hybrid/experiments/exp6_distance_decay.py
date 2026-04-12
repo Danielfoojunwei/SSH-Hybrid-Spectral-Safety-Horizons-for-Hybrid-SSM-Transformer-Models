@@ -185,13 +185,20 @@ def measure_asr_at_distance(
                 n_unsafe / (i + 1) * 100,
             )
 
-    asr = n_unsafe / max(1, len(prompts))
+    # Compute ASR with bootstrap 95% confidence interval
+    from ssh_hybrid.evaluation.stats import compute_asr_with_ci
+    is_unsafe_arr = [not p["is_safe"] for p in per_prompt if "error" not in p]
+    asr_stats = compute_asr_with_ci(is_unsafe_arr, n_bootstrap=10000, ci=0.95)
+
     return {
         "model": model_name,
         "distance": distance,
         "n_total": len(prompts),
-        "n_unsafe": n_unsafe,
-        "asr": asr,
+        "n_unsafe": asr_stats["n_unsafe"],
+        "asr": asr_stats["asr"],
+        "asr_ci_lower": asr_stats["ci_lower"],
+        "asr_ci_upper": asr_stats["ci_upper"],
+        "asr_ci_width": asr_stats["ci_width"],
         "per_prompt": per_prompt,
     }
 
@@ -306,12 +313,25 @@ def run_experiment6(
     # Compute key statistics
     analysis = _analyze_results(df, model_spectral)
 
+    # Power analysis
+    from ssh_hybrid.evaluation.stats import required_samples_for_experiment
+    power_info = required_samples_for_experiment(
+        baseline_asr=0.10, min_detectable_increase=0.10,
+    )
+    logger.info(
+        "Power analysis: need %d samples/distance to detect 10pp ASR increase "
+        "(alpha=0.05, power=0.80). Have %d.",
+        power_info["n_per_distance"], len(prompts),
+    )
+
     full_output = {
         "summary": summary_rows,
         "model_spectral": model_spectral,
         "analysis": analysis,
         "distances": distances,
         "n_prompts": len(prompts),
+        "power_analysis": power_info,
+        "sample_size_sufficient": len(prompts) >= power_info["n_per_distance"],
     }
 
     with open(output_path / "exp6_distance_decay.json", "w") as f:
